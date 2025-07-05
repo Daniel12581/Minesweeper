@@ -104,7 +104,7 @@ class Variable:
 
     @staticmethod
     def clearUndoDict():
-        undoDict = dict()
+        Variable.undoDict.clear()
 
     @staticmethod
     def restoreValues(reasonVar, reasonVal):

@@ -1,5 +1,6 @@
 import os
 import random
+from bitarray import bitarray
 
 from Code.minesweeper import Minesweeper
 from constraints import MSConstraint
@@ -177,6 +178,7 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic, balance_param,
     rows = game.rows
     cols = game.cols
     mines = game.total_mines
+    n_vars = rows * cols
 
     var_list = []
     varn = {}
@@ -235,19 +237,41 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic, balance_param,
         csp = build_csp()
         all_sols = bt_search(csp = csp, algo = bt_method, variableHeuristic = bt_heuristic, allSolutions=True, trace=False)
 
-        solution_dicts = []
+        # solution_dicts = []
+        # for sol in all_sols:
+        #     solution_dicts.append({var: val for (var, val) in sol})
+
+        counts_1 = [0] * n_vars
+        solution_bits = []
+
         for sol in all_sols:
-            solution_dicts.append({var: val for (var, val) in sol})
+            ba = bitarray(n_vars)
+            ba.setall(0)
+            for var, val in sol:
+                if val == 1:
+                    idx = int(var.name())
+                    ba[idx] = 1
+                    counts_1[idx] += 1
+            solution_bits.append(ba)
+
+        total_sols = len(solution_bits)
 
         forced_safe, forced_mine = set(), set()
         for var in csp.variables():
-            vals = [sol_dict[var] for sol_dict in solution_dicts]
+            # vals = [sol_dict[var] for sol_dict in solution_dicts]
+            #
+            # r, c = divmod(int(var.name()), cols)
+            # if all(v == 0 for v in vals):
+            #     forced_safe.add((r, c))
+            # elif all(v == 1 for v in vals):
+            #     forced_mine.add((r, c))
 
-            r, c = divmod(int(var.name()), cols)
-            if all(v == 0 for v in vals):
-                forced_safe.add((r, c))
-            elif all(v == 1 for v in vals):
+            idx = int(var.name())
+            r, c = divmod(idx, cols)
+            if counts_1[idx] == total_sols:
                 forced_mine.add((r, c))
+            elif counts_1[idx] == 0:
+                forced_safe.add((r, c))
 
         if forced_mine:
             for (r, c) in forced_mine:
@@ -255,9 +279,9 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic, balance_param,
                     game.toggle_flag(r, c)
 
         if forced_safe:
-            for (sr, sc) in forced_safe:
-                if not game.revealed[sr][sc] and not game.flagged[sr][sc]:
-                    game.probe(sr, sc)
+            for (r, c) in forced_safe:
+                if not game.revealed[r][c] and not game.flagged[r][c]:
+                    game.probe(r, c)
 
         if forced_mine or forced_safe:
             continue
