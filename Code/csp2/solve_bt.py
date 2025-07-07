@@ -21,11 +21,18 @@ def random_guess(game, rows, cols):
 
     return r, c
 
-def safest_guess(game, rows, cols, mines, solution_dicts, csp, varn):
+def safest_guess(game, rows, cols, mines, counts_one, total_sols, csp, varn):
     mine_prob = {}
-    total_sols = len(solution_dicts)
-    for var in csp.variables():
-        mine_prob[var] = sum(sol_dict[var] for sol_dict in solution_dicts) / total_sols
+    total_constrained_cells = 0
+    expected_mines_from_constrained_cells = 0
+
+    if total_sols:
+        for var in csp.variables():
+            idx = int(var.name())
+            mine_prob[var] = counts_one[idx] / total_sols
+            total_constrained_cells += 1
+            expected_mines_from_constrained_cells += mine_prob[var]
+
 
     if mine_prob:
         best_constrained_var = min(mine_prob, key=mine_prob.get)
@@ -40,11 +47,12 @@ def safest_guess(game, rows, cols, mines, solution_dicts, csp, varn):
         ]
         unconstrained_cells = [
             (r, c) for (r, c) in unrevealed_unflagged
-            if varn[(r, c)] not in mine_prob
+                if varn[(r, c)] not in mine_prob
         ]
 
-        remaining_mines = mines - sum(game.flagged[r][c] for r in range(rows) for c in range(cols))
-        remaining_cells = len(unrevealed_unflagged)
+        remaining_mines = (mines - sum(game.flagged[r][c] for r in range(rows) for c in range(cols))
+                           - expected_mines_from_constrained_cells)
+        remaining_cells = len(unrevealed_unflagged) - total_constrained_cells
         unconstrained_prob = (
             remaining_mines / remaining_cells if remaining_cells else 1.0
         )
@@ -89,11 +97,12 @@ def safest_guess(game, rows, cols, mines, solution_dicts, csp, varn):
     return r, c
 
 
-def frontier_guess(game, rows, cols, mines, solution_dicts, csp, varn):
+def frontier_guess(game, rows, cols, mines, counts_one, total_sols, csp, varn):
     mine_prob = {}
-    total_sols = len(solution_dicts)
-    for var in csp.variables():
-        mine_prob[var] = sum(sol_dict[var] for sol_dict in solution_dicts) / total_sols
+    if total_sols:
+        for var in csp.variables():
+            idx = int(var.name())
+            mine_prob[var] = counts_one[idx] / total_sols
 
     if mine_prob:
         best_constrained_var = min(mine_prob, key=mine_prob.get)
@@ -205,6 +214,15 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic, balance_param,
         txt.write("\n\n")
         s = ["", ""]
 
+
+
+    def accumulate_solution(sol):
+        nonlocal counts_one, total_sols
+        for var, val in sol:
+            if val == 1:
+                counts_one[int(var.name())] += 1
+        total_sols += 1
+
     while True:
         if print_board:
             print(game.get_board_str() + "\n")
@@ -234,27 +252,31 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic, balance_param,
                 txt.close()
             return True
 
+        counts_one = [0] * n_vars
+        total_sols = 0
+
         csp = build_csp()
-        all_sols = bt_search(csp = csp, algo = bt_method, variableHeuristic = bt_heuristic, allSolutions=True, trace=False)
+        all_sols = bt_search(csp = csp, algo = bt_method, variableHeuristic = bt_heuristic, allSolutions=True,
+                             trace=False, track_sol = accumulate_solution)
 
         # solution_dicts = []
         # for sol in all_sols:
         #     solution_dicts.append({var: val for (var, val) in sol})
 
-        counts_1 = [0] * n_vars
-        solution_bits = []
-
-        for sol in all_sols:
-            ba = bitarray(n_vars)
-            ba.setall(0)
-            for var, val in sol:
-                if val == 1:
-                    idx = int(var.name())
-                    ba[idx] = 1
-                    counts_1[idx] += 1
-            solution_bits.append(ba)
-
-        total_sols = len(solution_bits)
+        # counts_one = [0] * n_vars
+        # solution_bits = []
+        #
+        # for sol in all_sols:
+        #     ba = bitarray(n_vars)
+        #     ba.setall(0)
+        #     for var, val in sol:
+        #         if val == 1:
+        #             idx = int(var.name())
+        #             ba[idx] = 1
+        #             counts_one[idx] += 1
+        #     solution_bits.append(ba)
+        #
+        # total_sols = len(solution_bits)
 
         forced_safe, forced_mine = set(), set()
         for var in csp.variables():
@@ -268,9 +290,9 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic, balance_param,
 
             idx = int(var.name())
             r, c = divmod(idx, cols)
-            if counts_1[idx] == total_sols:
+            if counts_one[idx] == total_sols:
                 forced_mine.add((r, c))
-            elif counts_1[idx] == 0:
+            elif counts_one[idx] == 0:
                 forced_safe.add((r, c))
 
         if forced_mine:
@@ -290,10 +312,10 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic, balance_param,
             r, c = random_guess(game, rows, cols)
 
         elif guessing_heuristic == "safest":
-            r, c = safest_guess(game, rows, cols, mines, solution_dicts, csp, varn)
+            r, c = safest_guess(game, rows, cols, mines, counts_one, total_sols, csp, varn)
 
         elif guessing_heuristic == "frontier":
-            r, c = frontier_guess(game, rows, cols, mines, solution_dicts, csp, varn)
+            r, c = frontier_guess(game, rows, cols, mines, counts_one, total_sols, csp, varn)
 
         elif guessing_heuristic == "balanced":
             r, c = ...
@@ -305,4 +327,3 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic, balance_param,
 
         for (i, j) in newly:
             add_constraint_for_cell(i, j)
-

@@ -53,7 +53,7 @@ class UnassignedVars:
             self.unassigned.append(var)
 
 
-def bt_search(algo, csp, variableHeuristic, allSolutions, trace):
+def bt_search(algo, csp, variableHeuristic, allSolutions, trace, track_sol):
     '''Main interface routine for calling different forms of backtracking search
        algorithm is one of ['BT', 'FC', 'GAC']
        csp is a CSP object specifying the csp problem to solve
@@ -83,28 +83,36 @@ def bt_search(algo, csp, variableHeuristic, allSolutions, trace):
     for v in csp.variables():
         v.reset()
     if algo == 'BT':
-         solutions = BT(uv, csp, allSolutions, trace)
+         solutions = BT(uv, csp, allSolutions, trace, track_sol)
     elif algo == 'FC':
         for cnstr in csp.constraints():
             if cnstr.arity() == 1:
                 FCCheck(cnstr, None, None)  #FC with unary constraints at the root
-        solutions = FC(uv, csp, allSolutions, trace)
+        solutions = FC(uv, csp, allSolutions, trace, track_sol)
     elif algo == 'GAC':
         GacEnforce(csp.constraints(), csp, None, None) #GAC at the root
-        solutions = GAC(uv, csp, allSolutions, trace)
+        solutions = GAC(uv, csp, allSolutions, trace, track_sol)
 
     return solutions
 
-def BT(unAssignedVars, csp, allSolutions, trace):
+def BT(unAssignedVars, csp, allSolutions, trace, track_sol = None):
     if unAssignedVars.empty():
         if trace: print("{} Solution Found".format(csp.name()))
         soln = []
         for v in csp.variables():
             soln.append((v, v.getValue()))
+
+        if track_sol:
+            track_sol(soln)
+            return 1
+
         return [soln]
+
     solns = []
     nxtvar = unAssignedVars.extract()
+
     if trace: print("==>Trying {}".format(nxtvar.name()))
+
     for val in nxtvar.domain():
         if trace: print("==> {} = {}".format(nxtvar.name(), val))
         nxtvar.setValue(val)
@@ -115,50 +123,47 @@ def BT(unAssignedVars, csp, allSolutions, trace):
                     constraintsOK = False
                     if trace: print("<==falsified constraint\n")
                     break
+
         if constraintsOK:
-            new_solns = BT(unAssignedVars, csp, allSolutions, trace)
-            if new_solns:
-                solns.extend(new_solns)
-            if len(solns) > 0 and not allSolutions:
-                break
+            new_solns = BT(unAssignedVars, csp, allSolutions, trace, track_sol)
+            if not track_sol:
+                if new_solns:
+                    solns.extend(new_solns)
+                if len(solns) > 0 and not allSolutions:
+                    break
 
     nxtvar.unAssign()
     unAssignedVars.insert(nxtvar)
-    return solns
+
+    if track_sol:
+        return 1
+    else:
+        return solns
 
 def FCCheck(constraint, assignedVar, assignedVal):
-    """
-    Prune the domain of the single un-assigned variable in *constraint*.
-    `assignedVar/assignedVal` are the var/value we just committed to higher up
-    in the search tree – they are recorded as the *reason* when we prune.
-
-    Returns "OK"  – at least one value survives
-            "DWO" – domain-wipe-out (curDomainSize() == 0)
-    """
-    # There must be exactly one un-assigned variable in the constraint
     var = constraint.unAssignedVars()[0]
 
-    # Iterate over a *copy* of the current domain because we may prune values
     for val in list(var.curDomain()):
-        var.setValue(val)                # trial assignment
-        if not constraint.check():       # violates the constraint → prune
+        var.setValue(val)
+        if not constraint.check():
             var.pruneValue(val, assignedVar, assignedVal)
-        var.setValue(None)               # undo the trial assignment
+        var.setValue(None)
 
-        if var.curDomainSize() == 0:     # domain wipe-out
+        if var.curDomainSize() == 0:
             return "DWO"
 
     return "OK"
 
-def FC(unAssignedVars, csp, allSolutions, trace):
-    """
-    Standard Forward-Checking back-tracking search.
-    Mirrors the lecture pseudo-code (slide 63).
-    """
-    if unAssignedVars.empty():           # -- all variables assigned → solution
+def FC(unAssignedVars, csp, allSolutions, trace, track_sol = None):
+    if unAssignedVars.empty():
         soln = [(v, v.getValue()) for v in csp.variables()]
         if trace:
             print("{} Solution Found".format(csp.name()))
+
+        if track_sol:
+            track_sol(soln)
+            return 1
+
         return [soln]
 
     bt_search.nodesExplored += 1
@@ -168,34 +173,31 @@ def FC(unAssignedVars, csp, allSolutions, trace):
     if trace:
         print("==>Trying {}".format(var.name()))
 
-    for val in var.curDomain():          # *current* domain, not the original
+    for val in var.curDomain():
         if trace:
             print("==> {} = {}".format(var.name(), val))
 
         var.setValue(val)
         noDWO = True
 
-        # Forward checking on every constraint that now has exactly one
-        # un-assigned variable left (i.e. just `var`)
         for constraint in csp.constraintsOf(var):
             if constraint.numUnassigned() == 1:
                 if FCCheck(constraint, var, val) == "DWO":
-                    noDWO = False        # wipe-out ⇒ abandon this value
+                    noDWO = False
                     break
 
         if noDWO:
-            new_solns = FC(unAssignedVars, csp, allSolutions, trace)
-            if new_solns:
-                solns.extend(new_solns)
-            if solns and not allSolutions:
-                # found one solution and the caller only wants the first
-                Variable.restoreValues(var, val)
-                break
+            new_solns = FC(unAssignedVars, csp, allSolutions, trace, track_sol)
+            if not track_sol:
+                if new_solns:
+                    solns.extend(new_solns)
+                if solns and not allSolutions:
+                    Variable.restoreValues(var, val)
+                    break
 
-        # restore domains pruned while exploring var = val
         Variable.restoreValues(var, val)
 
-    var.setValue(None)                   # un-assign before back-tracking
+    var.setValue(None)
     unAssignedVars.insert(var)
     return solns
 
@@ -214,18 +216,24 @@ def GacEnforce(cnstrs, csp, assignedVar, assignedVal):
 
     return "OK"
 
-def GAC(unAssignedVars, csp, allSolutions, trace):
+def GAC(unAssignedVars, csp, allSolutions, trace, track_sol = None):
     if unAssignedVars.empty():
         if trace:
             pass # print("{} Solution Found".format(csp.name()))
         soln = []
         for v in csp.variables():
             soln.append((v, v.getValue()))
-        return [soln]  # each call returns a list of solutions found
+
+        if track_sol:
+            track_sol(soln)
+            return 1
+
+        return [soln]
 
     bt_search.nodesExplored += 1
-    solns = []  # so far we have no solutions from recursive calls
+    solns = []
     var = unAssignedVars.extract()
+
     if trace:
         pass # print("==>Trying {}".format(var.name()))
 
@@ -239,11 +247,12 @@ def GAC(unAssignedVars, csp, allSolutions, trace):
             noDWO = False
 
         if noDWO:
-            new_solns = GAC(unAssignedVars, csp, allSolutions, trace)
-            if new_solns:
-                solns.extend(new_solns)
-            if len(solns) > 0 and not allSolutions:
-                break  # don't bother with other values of var as we found a solution
+            new_solns = GAC(unAssignedVars, csp, allSolutions, trace, track_sol)
+            if not track_sol:
+                if new_solns:
+                    solns.extend(new_solns)
+                if len(solns) > 0 and not allSolutions:
+                    break
 
         Variable.restoreValues(var, val)
 

@@ -104,5 +104,5 @@ if __name__ == "__main__":
     # guessing_heuristic = "random", "safest", "frontier", "custom", "optimal"
     simulate_rounds(solve_bt, 200, pause = False,
                    print_board = False, save = True, bt_method = "GAC",
-                    bt_heuristic = "mrv", guessing_heuristic = "safest", easy = False, interm = False,
+                    bt_heuristic = "mrv", guessing_heuristic = "frontier", easy = False, interm = False,
                     expert = True)
