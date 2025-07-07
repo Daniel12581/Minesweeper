@@ -42,46 +42,34 @@ class MSConstraint(Constraint):
 
         Domains contain only 0/1, so we can reason with simple counts.
         """
-        # 1. Variable not actually in this constraint –– always supported.
         if var not in self.scope():
             return True
 
-        # 2. Value already pruned from var’s domain –– no support.
         if not var.inCurDomain(val):
             return False
 
-        # 3. Gather information about the already-assigned neighbours.
         assigned_sum = 0
         unassigned = []
         for v in self.scope():
             if v is var:
-                continue  # we treat (var = val) separately
+                continue
             if v.isAssigned():
                 assigned_sum += v.getValue()
             else:
                 unassigned.append(v)
 
-        # 4. Target still to reach after (var = val).
         remaining = self._target - (assigned_sum + val)
 
-        # Quick fail checks using min/max attainable with the
-        # *current* domains of the remaining variables.
-        #
-        #   min_possible = number of vars whose domain still contains 1? 0 : 1
-        #   max_possible = number of vars whose domain still contains 1
-        #
         min_possible = 0
         max_possible = 0
         for v in unassigned:
             has0 = v.inCurDomain(0)
             has1 = v.inCurDomain(1)
             if has1:
-                max_possible += 1  # we can make it a mine
+                max_possible += 1
             if not has0 and has1:
-                # forced 1 – contributes to both min and max
                 min_possible += 1
-        # Forced-0 variables do not increase min_possible.
-        #
+
         if remaining < min_possible or remaining > max_possible:
             return False
 
