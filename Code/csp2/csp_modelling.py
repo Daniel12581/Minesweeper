@@ -138,7 +138,7 @@ class Constraint:
         string) and its scope (an ORDERED list of variable
         objects).'''
         self._scope = list(scope)
-        self._name = "baseClass_" + name  # override in subconstraint types!
+        self._name = "baseClass_" + name
 
     def scope(self):
         return list(self._scope)

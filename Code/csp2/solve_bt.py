@@ -7,137 +7,190 @@ from constraints import MSConstraint
 from csp_modelling import Variable, CSP
 from backtracking import bt_search
 import time
+from collections import deque, defaultdict
 
-def random_guess(game, rows, cols):
-    possible_guess = [
-        (i, j)
-        for i in range(rows)
-        for j in range(cols)
-        if not game.revealed[i][j] and not game.flagged[i][j]
-    ]
+def list_unrevealed_unflagged(game):
+    rows, cols = game.rows, game.cols
+    return [(r, c) for r in range(rows) for c in range(cols)
+            if not game.revealed[r][c] and not game.flagged[r][c]]
 
-    guess_cell = random.choice(possible_guess)
-    r, c = guess_cell
+def corner_cells(rows, cols):
+    return [(0,0),(0,cols-1),(rows-1,0),(rows-1,cols-1)]
 
-    return r, c
+def pick_corner_edge_or_random(cells, rows, cols):
+    if not cells:
+        return None
+    corners = [c for c in corner_cells(rows, cols) if c in cells]
+    if corners:
+        return random.choice(corners)
+    edges = [ (r,c) for (r,c) in cells
+              if r in (0, rows-1) or c in (0, cols-1) ]
+    if edges:
+        return random.choice(edges)
+    return random.choice(cells)
 
-def safest_guess(game, rows, cols, mines, counts_one, total_sols, csp, varn):
-    mine_prob = {}
-    total_constrained_cells = 0
-    expected_mines_from_constrained_cells = 0
+def random_guess(game):
+    choices = list_unrevealed_unflagged(game)
+    return random.choice(choices)
 
-    if total_sols:
-        for var in csp.variables():
-            idx = int(var.name())
-            mine_prob[var] = counts_one[idx] / total_sols
-            total_constrained_cells += 1
-            expected_mines_from_constrained_cells += mine_prob[var]
+def safest_guess(game, prob_map, total_mines):
+    rows, cols = game.rows, game.cols
+    unrevealed = list_unrevealed_unflagged(game)
+    if not unrevealed:
+        return None
 
+    # Build constrained list
+    constrained = []
+    constrained_expected = 0.0
+    constrained_set = set()
+    for v, p in prob_map.items():
+        r, c = divmod(int(v.name()), cols)
+        if not game.revealed[r][c] and not game.flagged[r][c]:
+            constrained.append(((r,c), p))
+            constrained_expected += p
+            constrained_set.add((r,c))
 
-    if mine_prob:
-        best_constrained_var = min(mine_prob, key=mine_prob.get)
-        best_constrained_prob = mine_prob[best_constrained_var]
-        best_constrained_cell = divmod(int(best_constrained_var.name()), cols)
+    # Remaining mines (estimate)
+    flagged_count = sum(game.flagged[r][c] for r in range(rows) for c in range(cols))
+    estimated_mines_left = total_mines - flagged_count - constrained_expected
+    if estimated_mines_left < 0:
+        estimated_mines_left = 0  
 
-        unrevealed_unflagged = [
-            (r, c)
-            for r in range(rows)
-            for c in range(cols)
-            if not game.revealed[r][c] and not game.flagged[r][c]
-        ]
-        unconstrained_cells = [
-            (r, c) for (r, c) in unrevealed_unflagged
-                if varn[(r, c)] not in mine_prob
-        ]
+    unconstrained_cells = [cell for cell in unrevealed if cell not in constrained_set]
+    if unconstrained_cells:
+        p_uncon = estimated_mines_left / len(unconstrained_cells)
 
-        remaining_mines = (mines - sum(game.flagged[r][c] for r in range(rows) for c in range(cols))
-                           - expected_mines_from_constrained_cells)
-        remaining_cells = len(unrevealed_unflagged) - total_constrained_cells
-        unconstrained_prob = (
-            remaining_mines / remaining_cells if remaining_cells else 1.0
-        )
-
-        if unconstrained_cells and unconstrained_prob < best_constrained_prob:
-            corners = [(0, 0), (0, cols - 1), (rows - 1, 0), (rows - 1, cols - 1)]
-            corners = [xy for xy in corners if xy in unconstrained_cells]
-            if corners:
-                guess_cell = random.choice(corners)
-            else:
-                edges = [
-                    (r, c) for (r, c) in unconstrained_cells
-                    if r == 0 or r == rows - 1 or c == 0 or c == cols - 1
-                ]
-                guess_cell = random.choice(edges) if edges else random.choice(unconstrained_cells)
-        else:
-            guess_cell = best_constrained_cell
-
-        r, c = guess_cell
-
+    # No unconstrained available
     else:
-        unrevealed_unflagged = [
-            (r, c)
-            for r in range(rows)
-            for c in range(cols)
-            if not game.revealed[r][c] and not game.flagged[r][c]
-        ]
+        p_uncon = 1.0  
 
-        corners = [(0, 0), (0, cols - 1), (rows - 1, 0), (rows - 1, cols - 1)]
-        corners = [xy for xy in corners if xy in unrevealed_unflagged]
-        if corners:
-            guess_cell = random.choice(corners)
+    if constrained:
+        best_con, p_con = min(constrained, key=lambda x: x[1])
+        
+        if unconstrained_cells and p_uncon < p_con:
+            return pick_corner_edge_or_random(unconstrained_cells, rows, cols)
         else:
-            edges = [
-                (r, c) for (r, c) in unrevealed_unflagged
-                if r in (0, rows - 1) or c in (0, cols - 1)
-            ]
-            guess_cell = random.choice(edges) if edges else random.choice(unrevealed_unflagged)
-
-        r, c = guess_cell
-
-    return r, c
-
-
-def frontier_guess(game, rows, cols, mines, counts_one, total_sols, csp, varn):
-    mine_prob = {}
-    if total_sols:
-        for var in csp.variables():
-            idx = int(var.name())
-            mine_prob[var] = counts_one[idx] / total_sols
-
-    if mine_prob:
-        best_constrained_var = min(mine_prob, key=mine_prob.get)
-        best_constrained_cell = divmod(int(best_constrained_var.name()), cols)
-        r, c = best_constrained_cell
-
+            return best_con
     else:
-        unrevealed_unflagged = [
-            (r, c)
-            for r in range(rows)
-            for c in range(cols)
-            if not game.revealed[r][c] and not game.flagged[r][c]
-        ]
+        return pick_corner_edge_or_random(unrevealed, rows, cols)
 
-        corners = [(0, 0), (0, cols - 1), (rows - 1, 0), (rows - 1, cols - 1)]
-        corners = [xy for xy in corners if xy in unrevealed_unflagged]
-        if corners:
-            guess_cell = random.choice(corners)
-        else:
-            edges = [
-                (r, c) for (r, c) in unrevealed_unflagged
-                if r in (0, rows - 1) or c in (0, cols - 1)
-            ]
-            guess_cell = random.choice(edges) if edges else random.choice(unrevealed_unflagged)
+def frontier_guess(game, prob_map):
+    rows, cols = game.rows, game.cols
 
-        r, c = guess_cell
+    constrained = []
+    for v, p in prob_map.items():
+        r, c = divmod(int(v.name()), cols)
+        if not game.revealed[r][c] and not game.flagged[r][c]:
+            constrained.append(((r,c), p))
+    if constrained:
+        (cell, _p) = min(constrained, key=lambda x: x[1])
+        return cell
 
-    return r, c
+    return pick_corner_edge_or_random(list_unrevealed_unflagged(game), rows, cols)
+
+def balanced_guess(game, prob_map, total_mines, balance_param):
+    rows, cols = game.rows, game.cols
+    unrevealed = list_unrevealed_unflagged(game)
+    if not unrevealed:
+        return None
+
+    constrained = []
+    constrained_expected = 0.0
+    constrained_set = set()
+    for v, p in prob_map.items():
+        r, c = divmod(int(v.name()), cols)
+        if not game.revealed[r][c] and not game.flagged[r][c]:
+            constrained.append(((r,c), p))
+            constrained_expected += p
+            constrained_set.add((r,c))
+
+    flagged_count = sum(game.flagged[r][c] for r in range(rows) for c in range(cols))
+    estimated_mines_left = total_mines - flagged_count - constrained_expected
+    if estimated_mines_left < 0:
+        estimated_mines_left = 0
+
+    unconstrained_cells = [cell for cell in unrevealed if cell not in constrained_set]
+    if unconstrained_cells:
+        p_uncon = estimated_mines_left / len(unconstrained_cells)
+    else:
+        p_uncon = 1.0
+
+    if constrained:
+        best_con, p_con = min(constrained, key=lambda x: x[1])
+
+        if p_con <= balance_param:
+            return best_con
+
+        if unconstrained_cells and p_uncon < p_con:
+            return pick_corner_edge_or_random(unconstrained_cells, rows, cols)
+        return best_con
+    else:
+        return pick_corner_edge_or_random(unrevealed, rows, cols)
+
+def relative_balanced_guess(game, prob_map, total_mines, balance_param):
+    rows, cols = game.rows, game.cols
+    unrevealed = list_unrevealed_unflagged(game)
+    if not unrevealed:
+        return None
+
+    constrained = []
+    constrained_expected = 0.0
+    constrained_set = set()
+    for v, p in prob_map.items():
+        r, c = divmod(int(v.name()), cols)
+        if not game.revealed[r][c] and not game.flagged[r][c]:
+            constrained.append(((r,c), p))
+            constrained_expected += p
+            constrained_set.add((r,c))
+
+    flagged_count = sum(game.flagged[r][c] for r in range(rows) for c in range(cols))
+    estimated_mines_left = total_mines - flagged_count - constrained_expected
+    if estimated_mines_left < 0:
+        estimated_mines_left = 0
+
+    unconstrained_cells = [cell for cell in unrevealed if cell not in constrained_set]
+    if unconstrained_cells:
+        p_uncon = estimated_mines_left / len(unconstrained_cells)
+    else:
+        p_uncon = 1.0
+
+    if constrained:
+        best_con, p_con = min(constrained, key=lambda x: x[1])
+
+        if p_con <= balance_param + p_uncon:
+            return best_con
+
+        if unconstrained_cells and p_uncon < p_con:
+            return pick_corner_edge_or_random(unconstrained_cells, rows, cols)
+        return best_con
+    else:
+        return pick_corner_edge_or_random(unrevealed, rows, cols)
 
 
-def balanced_guess():
-    ...
 
-def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic, balance_param,
-             first_probe=(0, 0), print_board = False, files = None):
+def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic,
+             balance_param=1.0, first_probe=(0, 0),
+             print_board=False, files=None):
+
+    def add_constraint_for_cell(i, j):
+        n = game.get_cell_number(i, j)
+        if n is None or n == game.MINE:
+            return
+        flagged = 0
+        covered = []
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                if dr == 0 and dc == 0: continue
+                rr, cc = i + dr, j + dc
+                if 0 <= rr < rows and 0 <= cc < cols:
+                    if game.flagged[rr][cc]:
+                        flagged += 1
+                    elif not game.revealed[rr][cc]:
+                        covered.append(varn[(rr, cc)])
+        target = n - flagged
+        if covered:
+            constraints_list.append(MSConstraint(f"cell_{i}_{j}", covered, target))
+
     def rebuild_constraints():
         constraints_list.clear()
         for i in range(rows):
@@ -145,94 +198,93 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic, balance_param,
                 if game.revealed[i][j]:
                     add_constraint_for_cell(i, j)
 
-    def add_constraint_for_cell(i, j):
-        n = game.get_cell_number(i, j)
-        if n is None or n == game.MINE:
-            return
 
-        flagged_count = 0
-        covered_neighbors = []
-        for dr in (-1, 0, 1):
-            for dc in (-1, 0, 1):
-                if dr == 0 and dc == 0:
-                    continue
-                rr, cc = i + dr, j + dc
-                if 0 <= rr < rows and 0 <= cc < cols:
-                    if game.flagged[rr][cc]:
-                        flagged_count += 1
-                    elif not game.revealed[rr][cc]:
-                        covered_neighbors.append(varn[(rr, cc)])
+    def compute_components(constraints, varn, nvar):
+        adj = defaultdict(set)
+        frontier_vars = set()
+        for c in constraints:
+            scope = c.scope()
+            frontier_vars.update(scope)
 
-        target = n - flagged_count
-        if covered_neighbors:
-            name = f"cell_{i}_{j}"
-            c = MSConstraint(name, covered_neighbors, target)
-            constraints_list.append(c)
+            for i in range(len(scope)):
+                for j in range(i + 1, len(scope)):
+                    v1, v2 = scope[i], scope[j]
+                    adj[v1].add(v2)
+                    adj[v2].add(v1)
 
-    def build_csp():
-        vars_in_scope = set()
-        for con in constraints_list:
-            vars_in_scope.update(con.scope())
-        return CSP("MinesweeperCSP",
-                   list(vars_in_scope),
-                   constraints_list)
+        comps = []
+        seen = set()
+        for v in frontier_vars:
+            if v in seen:
+                continue
+            q = deque([v])
+            seen.add(v)
+            comp = []
+            while q:
+                cur = q.popleft()
+                comp.append(cur)
+                for nb in adj[cur]:
+                    if nb not in seen:
+                        seen.add(nb)
+                        q.append(nb)
+            comps.append(comp)
+        return comps
 
-    if bt_method not in {"BT", "FC", "GAC"} or bt_heuristic not in {"random", "mrv"} or \
-        guessing_heuristic not in {"random", "safest", "frontier", "balanced"}:
-        raise ValueError("bt_method must be one of random, FC, GAC")
+        return curr_comps
 
-    if guessing_heuristic == "balanced" and (balance_param < 0 or balance_param > 1):
-        raise ValueError("balance_param must be between 0 and 1")
+    def constraints_for_component(comp_vars, constraints):
+        comp_set = set(comp_vars)
+        return [c for c in constraints if all(v in comp_set for v in c.scope())]
 
-    rows = game.rows
-    cols = game.cols
+    if bt_method not in {"BT", "FC", "GAC"}:
+        raise ValueError("bt_method must be one of BT, FC, GAC")
+    if bt_heuristic not in {"random", "mrv"}:
+        raise ValueError("bt_heuristic must be one of random, mrv")
+    if guessing_heuristic not in {"random", "safest", "frontier", "balanced", "relative_balanced"}:
+        raise ValueError("guessing_heuristic invalid")
+    if guessing_heuristic in {"balanced", "relative_balanced"} and not (0.0 <= balance_param <= 1.0):
+        raise ValueError("balance_param out of range")
+
+    rows, cols = game.rows, game.cols
     mines = game.total_mines
-    n_vars = rows * cols
 
-    var_list = []
     varn = {}
+    nvar = {}
     for r in range(rows):
         for c in range(cols):
             v = Variable(str(r * cols + c), [0, 1])
-            var_list.append(v)
             varn[(r, c)] = v
+            nvar[v] = (r, c)
 
     constraints_list = []
 
-    r0, c0 = first_probe
-    game.probe(r0, c0)
+    game.probe(*first_probe)
 
+    # File logging init (unchanged skeleton)
     if files:
         init_time = time.time()
-        prev_time = time.time()
-        cur_time = time.time()
+        prev_time = init_time
+        curr_time = init_time
         os.makedirs(os.path.dirname(files[0]), exist_ok=True)
         os.makedirs(os.path.dirname(files[1]), exist_ok=True)
         num_guesses = 0
         csv = open(files[0], "a")
         txt = open(files[1], "w", encoding="utf-8")
         txt.write("\n\n")
-        s = ["", ""]
 
-
-
-    def accumulate_solution(sol):
-        nonlocal counts_one, total_sols
-        for var, val in sol:
-            if val == 1:
-                counts_one[int(var.name())] += 1
-        total_sols += 1
-
+    # ------------- Main loop -------------
     while True:
         if print_board:
-            print(game.get_board_str() + "\n")
+            print(game.get_board_str(), "\n")
         if files:
-            prev_time = cur_time
+            prev_time = curr_time
             cur_time = time.time()
             txt.write(game.get_board_str() + "\n")
             txt.write(f"Took: {cur_time - prev_time} seconds\n\n")
 
         rebuild_constraints()
+
+        # Terminal checks
         if game.game_over:
             if files:
                 txt.seek(0)
@@ -252,78 +304,64 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic, balance_param,
                 txt.close()
             return True
 
-        counts_one = [0] * n_vars
-        total_sols = 0
+        components = compute_components(constraints_list, varn, nvar)
 
-        csp = build_csp()
-        all_sols = bt_search(csp = csp, algo = bt_method, variableHeuristic = bt_heuristic, allSolutions=True,
-                             trace=False, track_sol = accumulate_solution)
+        forced_safe = set()
+        forced_mine = set()
+        prob_map = {}
 
-        # solution_dicts = []
-        # for sol in all_sols:
-        #     solution_dicts.append({var: val for (var, val) in sol})
+        for comp_idx, comp_vars in enumerate(components):
+            comp_constraints = constraints_for_component(comp_vars, constraints_list)
 
-        # counts_one = [0] * n_vars
-        # solution_bits = []
-        #
-        # for sol in all_sols:
-        #     ba = bitarray(n_vars)
-        #     ba.setall(0)
-        #     for var, val in sol:
-        #         if val == 1:
-        #             idx = int(var.name())
-        #             ba[idx] = 1
-        #             counts_one[idx] += 1
-        #     solution_bits.append(ba)
-        #
-        # total_sols = len(solution_bits)
+            local_mine_counts = {v: 0 for v in comp_vars}
+            local_total = 0
 
-        forced_safe, forced_mine = set(), set()
-        for var in csp.variables():
-            # vals = [sol_dict[var] for sol_dict in solution_dicts]
-            #
-            # r, c = divmod(int(var.name()), cols)
-            # if all(v == 0 for v in vals):
-            #     forced_safe.add((r, c))
-            # elif all(v == 1 for v in vals):
-            #     forced_mine.add((r, c))
+            def acc(sol):
+                nonlocal local_total
+                local_total += 1
+                for v, val in sol:
+                    if val == 1:
+                        local_mine_counts[v] += 1
 
-            idx = int(var.name())
-            r, c = divmod(idx, cols)
-            if counts_one[idx] == total_sols:
-                forced_mine.add((r, c))
-            elif counts_one[idx] == 0:
-                forced_safe.add((r, c))
+            csp = CSP(f"Comp_{comp_idx}", comp_vars, comp_constraints)
 
-        if forced_mine:
+            bt_search(csp=csp, algo=bt_method, variableHeuristic=bt_heuristic,
+                      allSolutions=True, trace=False, track_sol=acc)
+
+            for v in comp_vars:
+                m = local_mine_counts[v]
+                if m == 0:
+                    forced_safe.add(nvar[v])
+                elif m == local_total:
+                    forced_mine.add(nvar[v])
+                prob_map[v] = m / local_total
+
+        if forced_mine or forced_safe:
             for (r, c) in forced_mine:
                 if not game.flagged[r][c]:
                     game.toggle_flag(r, c)
-
-        if forced_safe:
             for (r, c) in forced_safe:
-                if not game.revealed[r][c] and not game.flagged[r][c]:
-                    game.probe(r, c)
-
-        if forced_mine or forced_safe:
+                if (not game.revealed[r][c]) and (not game.flagged[r][c]):
+                    newly = game.probe(r, c) or set()
+                    for (i, j) in newly:
+                        add_constraint_for_cell(i, j)
             continue
 
         if guessing_heuristic == "random":
-            r, c = random_guess(game, rows, cols)
-
-        elif guessing_heuristic == "safest":
-            r, c = safest_guess(game, rows, cols, mines, counts_one, total_sols, csp, varn)
-
+            r, c = random_guess(game)
         elif guessing_heuristic == "frontier":
-            r, c = frontier_guess(game, rows, cols, mines, counts_one, total_sols, csp, varn)
-
+            r, c = frontier_guess(game, prob_map)
+        elif guessing_heuristic == "safest":
+            r, c = safest_guess(game, prob_map, mines)
         elif guessing_heuristic == "balanced":
-            r, c = ...
+            r, c = balanced_guess(game, prob_map, mines, balance_param)
+        elif guessing_heuristic == "relative_balanced":
+            r, c = relative_balanced_guess(game, prob_map, mines, balance_param)
+        else:
+            r, c = random_guess(game)
 
         newly = game.probe(r, c) or set()
-
-        if files:
-            num_guesses += 1
-
         for (i, j) in newly:
             add_constraint_for_cell(i, j)
+        if files:
+            num_guesses += 1
