@@ -1,7 +1,7 @@
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
-
+import numpy as np
 matplotlib.use('TkAgg')
 
 def get_stat(path, name = "na", graph_time = False, graph_win_rate = False):
@@ -48,6 +48,37 @@ def get_stat(path, name = "na", graph_time = False, graph_win_rate = False):
 
         plt.show()
 
+def get_multi_graph(path, difficulty, name, decimal_place, start, end, step):
+    curr_path = ""
+    total_df = pd.DataFrame(columns=["alpha", "win rate"])
+
+    for i in np.arange(start, end, step):
+        alpha = round(i, decimal_place)
+        curr_path = f"{path}_{alpha}/{difficulty}/summary.csv"
+
+        df = pd.read_csv(curr_path, header=None, names=["status", "time", "numberofguesses"])
+
+        df["statusflag"] = df["status"].apply(lambda x: 1 if x == "Won" else 0)
+        win_rate = df["statusflag"].mean()
+
+        new_row = pd.DataFrame([{"alpha": i, "win rate": win_rate}])
+        total_df = pd.concat([total_df, new_row], ignore_index=True)
+
+    total_df.plot(x = "alpha", y = "win rate", kind = "scatter")
+    plt.title(f"Alpha vs Win Rate ({name})")
+    plt.xlabel("Alpha")
+    plt.ylabel("Win Rate")
+
+    ax = plt.gca()
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+
+    plt.show()
+
+
+
+
+
 if __name__ == "__main__":
     # path_dssp_easy = "../dssp/easy/easy.csv"
     # path_dssp_interm = "../dssp/interm/interm.csv"
@@ -59,11 +90,15 @@ if __name__ == "__main__":
 
     path_GAC_safest_easy = "../games/GAC_mrv_safest/easy/easy.csv"
     path_GAC_safest_interm = "../games/GAC_mrv_safest/interm/interm.csv"
-    path_GAC_safest_expert = "../games/GAC_mrv_safest/expert/expert.csv"
+    path_GAC_safest_expert = "../games/GAC_mrv_safest_5000/expert/summary.csv"
 
     path_GAC_frontier_easy = "../games/GAC_mrv_frontier/easy/easy.csv"
     path_GAC_frontier_interm = "../games/GAC_mrv_frontier/interm/interm.csv"
-    path_GAC_frontier_expert = "../games/GAC_mrv_frontier/expert/expert.csv"
+    path_GAC_frontier_expert = "../games/GAC_mrv_frontier_5000/expert/summary.csv"
+
+    path_GAC_balanced_expert = "../games/GAC_mrv_balanced_5000"
+
+    path_GAC_relative_balanced_expert = "../games/GAC_mrv_relative_balanced_5000"
 
     # get_stat(path_dssp_easy)
     # get_stat(path_dssp_interm)
@@ -73,4 +108,8 @@ if __name__ == "__main__":
     # get_stat(path_safest_easy, name="Easy + Safest Guess", graph_win_rate=True)
     # get_stat(path_safest_interm, name="Interm + Safest Guess", graph_win_rate=True)
 
-    get_stat(path_GAC_safest_expert)
+    #get_stat(path_GAC_frontier_expert)
+
+    get_multi_graph(path_GAC_relative_balanced_expert, difficulty = "expert",
+                    name = "Relative-Balanced Guess Heuristic",
+                    decimal_place = 2, start = 0.0, end = 0.45, step = 0.05)
