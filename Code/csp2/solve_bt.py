@@ -88,7 +88,7 @@ def frontier_guess(game, prob_map):
 
     return pick_corner_edge_or_random(list_unrevealed_unflagged(game), rows, cols)
 
-def balanced_guess(game, prob_map, total_mines, balance_param):
+def frontier_balanced_guess(game, prob_map, total_mines, balance_param):
     rows, cols = game.rows, game.cols
     unrevealed = list_unrevealed_unflagged(game)
     if not unrevealed:
@@ -127,7 +127,7 @@ def balanced_guess(game, prob_map, total_mines, balance_param):
     else:
         return pick_corner_edge_or_random(unrevealed, rows, cols)
 
-def relative_balanced_guess(game, prob_map, total_mines, balance_param):
+def frontier_relative_balanced_guess(game, prob_map, total_mines, balance_param):
     rows, cols = game.rows, game.cols
     unrevealed = list_unrevealed_unflagged(game)
     if not unrevealed:
@@ -166,6 +166,146 @@ def relative_balanced_guess(game, prob_map, total_mines, balance_param):
     else:
         return pick_corner_edge_or_random(unrevealed, rows, cols)
 
+def useful_relative_balanced_guess(game, prob_map, total_mines, constraints_list, balance_param):
+    rows, cols = game.rows, game.cols
+    unrevealed = list_unrevealed_unflagged(game)
+
+    useful_vars = set()
+
+    for cons in constraints_list:
+        if cons.get_target() == len(cons.scope()) - 1:
+            for var in cons.scope():
+                useful_vars.add(var)
+
+    useful_constrained = []
+    constrained_expected = 0.0
+    constrained_set = set()
+    for v, p in prob_map.items():
+        r, c = divmod(int(v.name()), cols)
+        if not game.revealed[r][c] and not game.flagged[r][c]:
+            constrained_expected += p
+            constrained_set.add((r, c))
+            if v in useful_vars:
+                useful_constrained.append(((r, c), p))
+
+    flagged_count = sum(game.flagged[r][c] for r in range(rows) for c in range(cols))
+    estimated_mines_left = total_mines - flagged_count - constrained_expected
+    if estimated_mines_left < 0:
+        estimated_mines_left = 0
+
+    unconstrained_cells = [cell for cell in unrevealed if cell not in constrained_set]
+    if unconstrained_cells:
+        p_uncon = estimated_mines_left / len(unconstrained_cells)
+    else:
+        p_uncon = 1.0
+
+    if useful_constrained:
+        best_con, p_con = min(useful_constrained, key=lambda x: x[1])
+
+        if p_con <= balance_param + p_uncon:
+            return best_con
+
+        if unconstrained_cells and p_uncon < p_con:
+            return pick_corner_edge_or_random(unconstrained_cells, rows, cols)
+
+        return best_con
+
+    else:
+        return pick_corner_edge_or_random(unrevealed, rows, cols)
+
+def most_useful_guess(game, prob_map, total_mines, constraints_list):
+    def best_pick_with_prob_zero_before_mine(cells, rows, cols, p_uncon):
+        if not cells:
+            return None, -1
+
+        corners = [c for c in corner_cells(rows, cols) if c in cells]
+        if corners:
+            p_zero = (1 - p_uncon) ** 4
+            p_zero_before_mine = p_zero / (p_zero + p_uncon)
+            return random.choice(corners), p_zero_before_mine
+
+        edges = [(r, c) for (r, c) in cells
+                if r in (0, rows - 1) or c in (0, cols - 1)]
+        if edges:
+            p_zero = (1 - p_uncon) ** 6
+            p_zero_before_mine = p_zero / (p_zero + p_uncon)
+            return random.choice(edges), p_zero_before_mine
+
+        else:
+            p_zero = (1 - p_uncon) ** 9
+            p_zero_before_mine = p_zero / (p_zero + p_uncon)
+            return random.choice(cells), p_zero_before_mine
+
+    rows, cols = game.rows, game.cols
+    unrevealed = list_unrevealed_unflagged(game)
+
+    useful_vars = set()
+
+    for cons in constraints_list:
+        if cons.get_target() == len(cons.scope()) - 1:
+            for var in cons.scope():
+                useful_vars.add(var)
+
+    useful_constrained = []
+    constrained_expected = 0.0
+    constrained_set = set()
+    for v, p in prob_map.items():
+        r, c = divmod(int(v.name()), cols)
+        if not game.revealed[r][c] and not game.flagged[r][c]:
+            constrained_expected += p
+            constrained_set.add((r, c))
+            if v in useful_vars:
+                useful_constrained.append(((r, c), p))
+
+    flagged_count = sum(game.flagged[r][c] for r in range(rows) for c in range(cols))
+    estimated_mines_left = total_mines - flagged_count - constrained_expected
+    if estimated_mines_left < 0:
+        estimated_mines_left = 0
+
+    unconstrained_cells = [cell for cell in unrevealed if cell not in constrained_set]
+
+    if unconstrained_cells:
+        p_uncon = estimated_mines_left / len(unconstrained_cells)
+    else:
+        p_uncon = 1.0
+
+    cell_free, p_zero_before_mine = best_pick_with_prob_zero_before_mine(
+        unconstrained_cells, rows, cols, p_uncon
+    )
+
+    if useful_constrained:
+        best_con, p_con_mine = min(useful_constrained, key=lambda x: x[1])
+        p_con_safe = 1.0 - p_con_mine  # success metric for frontier
+
+        if cell_free is not None and p_zero_before_mine > p_con_safe:
+            return cell_free
+        return best_con
+
+    else:
+        return pick_corner_edge_or_random(unrevealed, rows, cols)
+
+def useful_more_than_k_guess(game, prob_map, total_mines, constraints_list, k):
+    rows, cols = game.rows, game.cols
+    unrevealed = list_unrevealed_unflagged(game)
+
+    useful_cons_vars = set()
+
+    for cons in constraints_list:
+        if cons.get_target() == len(cons.scope()) - 1:
+            for var in cons.scope():
+                useful_cons_vars.add((cons, var))
+
+    for cons, var in useful_cons_vars:
+        game_copy = game.copy()
+
+        other_vars = set(cons.scope())
+        other_vars.remove(var)
+
+        game.toggle_flag()
+
+
+
+
 
 
 def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic,
@@ -186,12 +326,12 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic,
                     if game.flagged[rr][cc]:
                         flagged += 1
                     elif not game.revealed[rr][cc]:
-                        covered.append(varn[(rr, cc)])
+                        covered.append(index_to_var[(rr, cc)])
         target = n - flagged
         if covered:
             constraints_list.append(MSConstraint(f"cell_{i}_{j}", covered, target))
 
-    def rebuild_constraints():
+    def rebuild_constraints(constraints_list):
         constraints_list.clear()
         for i in range(rows):
             for j in range(cols):
@@ -199,7 +339,7 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic,
                     add_constraint_for_cell(i, j)
 
 
-    def compute_components(constraints, varn, nvar):
+    def compute_components(constraints, index_to_var, var_to_index):
         adj = defaultdict(set)
         frontier_vars = set()
         for c in constraints:
@@ -230,7 +370,6 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic,
             comps.append(comp)
         return comps
 
-        return curr_comps
 
     def constraints_for_component(comp_vars, constraints):
         comp_set = set(comp_vars)
@@ -240,7 +379,9 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic,
         raise ValueError("bt_method must be one of BT, FC, GAC")
     if bt_heuristic not in {"random", "mrv"}:
         raise ValueError("bt_heuristic must be one of random, mrv")
-    if guessing_heuristic not in {"random", "safest", "frontier", "balanced", "relative_balanced"}:
+    if guessing_heuristic not in {"random", "safest", "frontier", "frontier_balanced",
+                                  "frontier_relative_balanced", "useful_relative_balanced",
+                                  "most_useful"}:
         raise ValueError("guessing_heuristic invalid")
     if guessing_heuristic in {"balanced", "relative_balanced"} and not (0.0 <= balance_param <= 1.0):
         raise ValueError("balance_param out of range")
@@ -248,13 +389,13 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic,
     rows, cols = game.rows, game.cols
     mines = game.total_mines
 
-    varn = {}
-    nvar = {}
+    index_to_var = {}
+    var_to_index = {}
     for r in range(rows):
         for c in range(cols):
             v = Variable(str(r * cols + c), [0, 1])
-            varn[(r, c)] = v
-            nvar[v] = (r, c)
+            index_to_var[(r, c)] = v
+            var_to_index[v] = (r, c)
 
     constraints_list = []
 
@@ -282,7 +423,7 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic,
             txt.write(game.get_board_str() + "\n")
             txt.write(f"Took: {cur_time - prev_time} seconds\n\n")
 
-        rebuild_constraints()
+        rebuild_constraints(constraints_list)
 
         # Terminal checks
         if game.game_over:
@@ -304,7 +445,7 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic,
                 txt.close()
             return True
 
-        components = compute_components(constraints_list, varn, nvar)
+        components = compute_components(constraints_list, index_to_var, var_to_index)
 
         forced_safe = set()
         forced_mine = set()
@@ -331,9 +472,9 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic,
             for v in comp_vars:
                 m = local_mine_counts[v]
                 if m == 0:
-                    forced_safe.add(nvar[v])
+                    forced_safe.add(var_to_index[v])
                 elif m == local_total:
-                    forced_mine.add(nvar[v])
+                    forced_mine.add(var_to_index[v])
                 prob_map[v] = m / local_total
 
         if forced_mine or forced_safe:
@@ -353,11 +494,16 @@ def solve_bt(game, bt_method, bt_heuristic, guessing_heuristic,
             r, c = frontier_guess(game, prob_map)
         elif guessing_heuristic == "safest":
             r, c = safest_guess(game, prob_map, mines)
-        elif guessing_heuristic == "balanced":
-            r, c = balanced_guess(game, prob_map, mines, balance_param)
-        elif guessing_heuristic == "relative_balanced":
-            r, c = relative_balanced_guess(game, prob_map, mines, balance_param)
+        elif guessing_heuristic == "frontier_balanced":
+            r, c = frontier_balanced_guess(game, prob_map, mines, balance_param)
+        elif guessing_heuristic == "frontier_relative_balanced":
+            r, c = frontier_relative_balanced_guess(game, prob_map, mines, balance_param)
+        elif guessing_heuristic == "useful_relative_balanced":
+            r, c = useful_relative_balanced_guess(game, prob_map, mines, constraints_list, balance_param)
+        elif guessing_heuristic == "most_useful":
+            r, c = most_useful_guess(game, prob_map, mines, constraints_list)
         else:
+            print("warning")
             r, c = random_guess(game)
 
         newly = game.probe(r, c) or set()

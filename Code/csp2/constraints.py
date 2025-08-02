@@ -21,6 +21,9 @@ class MSConstraint(Constraint):
         self._name = "Minesweeper_" + name
         self._target = target_mine_count
 
+    def get_target(self):
+        return self._target
+
     def check(self):
         """
         If some variables in scope are still unassigned, return True (cannot yet falsify).

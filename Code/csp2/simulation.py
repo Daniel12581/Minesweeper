@@ -67,10 +67,6 @@ def simulate_expert_games(algo, n, bt_method, bt_heuristic, guessing_heuristic, 
 def simulate_rounds(algo, n, bt_method, bt_heuristic, guessing_heuristic, balance_param = 1.0,
                     pause = False, print_board = False, save = False,
                     easy = True, interm = True, expert = True, suffix = ""):
-    if bt_method not in {"BT", "FC", "GAC"} or bt_heuristic not in {"random", "mrv"} or \
-        guessing_heuristic not in {"random", "safest", "frontier", "balanced", "relative_balanced"}:
-        return
-
     if guessing_heuristic == "balanced" and (balance_param < 0 or balance_param > 1):
         return
 
@@ -104,11 +100,20 @@ def simulate_rounds(algo, n, bt_method, bt_heuristic, guessing_heuristic, balanc
 if __name__ == "__main__":
     # bt_method = "BT", "FC", "GAC"
     # bt_heuristic = "random", "mrv"
-    # guessing_heuristic = "random", "safest", "frontier", "balanced", "relative_balanced"
-    num_rounds = 100
-    balance_param = 0.0
-    simulate_rounds(solve_bt, n = num_rounds, pause = False,
-                   print_board = False, save = False, bt_method = "GAC",
-                    bt_heuristic = "mrv", guessing_heuristic = "frontier", suffix = f"{num_rounds}_{balance_param}",
-                    easy = False, interm = False,
-                    expert = True, balance_param = balance_param)
+    # guessing_heuristic = "random", "safest", "frontier", "frontier_balanced", "frontier_relative_balanced"
+    #                      "useful_relative_balanced"
+    num_rounds = 1000
+    balance_param = 1
+    simulate_rounds(solve_bt,
+                    n = num_rounds,
+                    pause = False,
+                    print_board = False,
+                    save = False,
+                    bt_method = "GAC",
+                    bt_heuristic = "mrv",
+                    guessing_heuristic = "most_useful",
+                    suffix = f"{num_rounds}_{balance_param}",
+                    easy = False,
+                    interm = False,
+                    expert = True,
+                    balance_param = balance_param)

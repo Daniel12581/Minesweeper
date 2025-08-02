@@ -262,5 +262,8 @@ class CSP:
 
         return errs
 
+    def copy(self):
+        return CSP(self.name, self._variables, self._constraints)
+
     def __str__(self):
         return "CSP {}".format(self.name())
